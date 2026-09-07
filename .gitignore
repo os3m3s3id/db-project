@@ -1,7 +1,7 @@
 src
 .env
 
-# bronze ingestion outputs (generated)
+# bronze ingestion outputs
 jobs/bronze-jobs/data/raw-data/
 jobs/bronze-jobs/data/pipeline.duckdb
 jobs/bronze-jobs/data/*.duckdb.wal
