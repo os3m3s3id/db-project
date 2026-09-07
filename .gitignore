@@ -5,3 +5,4 @@ src
 jobs/bronze-jobs/data/raw-data/
 jobs/bronze-jobs/data/pipeline.duckdb
 jobs/bronze-jobs/data/*.duckdb.wal
+jobs/bronze-jobs/data/*.csv
