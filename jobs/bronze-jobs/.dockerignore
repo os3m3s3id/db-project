@@ -1,0 +1,6 @@
+# generated outputs never belong in the build context (source CSV IS copied in)
+data/raw-data/
+data/pipeline.duckdb
+data/*.duckdb.wal
+__pycache__/
+*.pyc

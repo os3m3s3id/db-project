@@ -1,0 +1,43 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: postgres_db
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5439:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app_network
+
+  bronze-ingest:
+    build:
+      context: ./jobs/bronze-jobs
+      dockerfile: Dockerfile
+    image: db-project/bronze-ingest:latest
+    container_name: bronze_ingest
+    environment:
+      TZ: UTC
+    volumes:
+      - ./jobs/bronze-jobs/data:/app/data
+    networks:
+      - app_network
+    restart: "no"
+    # one-shot job — not started by `docker compose up`; run explicitly:
+    #   docker compose run --rm bronze-ingest
+    #   docker compose run --rm bronze-ingest --selftest
+    #   docker compose run --rm bronze-ingest --force
+    profiles:
+      - jobs
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  app_network:
+    driver: bridge
