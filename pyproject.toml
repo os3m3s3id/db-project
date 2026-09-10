@@ -9,7 +9,9 @@ dependencies = [
     "duckdb>=1.5.5",
     "jupyter>=1.1.1",
     "nbconvert>=7.17.1",
+    "psycopg2>=2.9.13",
     "pytz>=2026.3.post1",
+    "sqlalchemy>=2.0.52",
 ]
 
 [project.scripts]
