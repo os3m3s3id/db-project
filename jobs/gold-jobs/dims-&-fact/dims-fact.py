@@ -84,7 +84,8 @@ try:
         );
     """)
 
-    # 2b. Indexes — speed up the NOT EXISTS lookups below.
+
+    # 2a. Indexes — speed up lookups/joins below.
     con.execute("""
         CREATE UNIQUE INDEX IF NOT EXISTS idx_products_dim_product_id
             ON pg.data_warehouse.products_dim (product_id);
@@ -115,78 +116,89 @@ try:
             ON pg.silver.silver_table (event_type);
     """)
 
-    # 3. Load ONLY new products — one row per product_id.
-    #    A product_id can appear with conflicting category/brand values across
-    #    events (data drift), so we can't just DISTINCT on all columns — that
-    #    can produce two "distinct" rows sharing the same product_id, which
-    #    violates the UNIQUE constraint. Instead, rank by event_time and keep
-    #    only the most recent attributes per product_id.
+
     con.execute("""
-        INSERT INTO pg.data_warehouse.products_dim (product_key, product_id, category_id, category_code, brand)
-        SELECT
-            (SELECT COALESCE(MAX(product_key), 0) FROM pg.data_warehouse.products_dim)
-                + ROW_NUMBER() OVER () AS product_key,
-            product_id, category_id, category_code, brand
-        FROM (
+        MERGE INTO pg.data_warehouse.products_dim AS target
+        USING (
             SELECT
-                st.product_id, st.category_id, st.category_code, st.brand,
-                ROW_NUMBER() OVER (
-                    PARTITION BY st.product_id
-                    ORDER BY st.event_time DESC
-                ) AS rn
-            FROM pg.silver.silver_table st
-            WHERE st.product_id IS NOT NULL
-              AND NOT EXISTS (
-                  SELECT 1 FROM pg.data_warehouse.products_dim pd
-                  WHERE pd.product_id = st.product_id
-              )
-        ) ranked
-        WHERE rn = 1;
+                product_id, category_id, category_code, brand,
+                (SELECT COALESCE(MAX(product_key), 0) FROM pg.data_warehouse.products_dim)
+                    + ROW_NUMBER() OVER (ORDER BY product_id) AS new_product_key
+            FROM (
+                SELECT
+                    st.product_id, st.category_id, st.category_code, st.brand,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY st.product_id
+                        ORDER BY st.event_time DESC
+                    ) AS rn
+                FROM pg.silver.silver_table st
+                WHERE st.product_id IS NOT NULL
+            ) ranked
+            WHERE rn = 1
+        ) AS source
+        ON target.product_id = source.product_id
+        WHEN MATCHED AND (
+                target.category_id   IS DISTINCT FROM source.category_id
+             OR target.category_code IS DISTINCT FROM source.category_code
+             OR target.brand         IS DISTINCT FROM source.brand
+        ) THEN
+            UPDATE SET
+                category_id   = source.category_id,
+                category_code = source.category_code,
+                brand         = source.brand
+        WHEN NOT MATCHED THEN
+            INSERT (product_key, product_id, category_id, category_code, brand)
+            VALUES (
+                source.new_product_key, source.product_id,
+                source.category_id, source.category_code, source.brand
+            );
     """)
 
-    # 4. Load ONLY new users — DISTINCT is safe here since user_id is the
-    #    only column selected (one row per user_id already, by definition).
+
+
     con.execute("""
-        INSERT INTO pg.data_warehouse.users_dim (user_key, user_id)
-        SELECT
-            (SELECT COALESCE(MAX(user_key), 0) FROM pg.data_warehouse.users_dim)
-                + ROW_NUMBER() OVER () AS user_key,
-            user_id
-        FROM (
-            SELECT DISTINCT st.user_id
-            FROM pg.silver.silver_table st
-            WHERE st.user_id IS NOT NULL
-              AND NOT EXISTS (
-                  SELECT 1 FROM pg.data_warehouse.users_dim ud
-                  WHERE ud.user_id = st.user_id
-              )
-        );
+        MERGE INTO pg.data_warehouse.users_dim AS target
+        USING (
+            SELECT
+                user_id,
+                (SELECT COALESCE(MAX(user_key), 0) FROM pg.data_warehouse.users_dim)
+                    + ROW_NUMBER() OVER (ORDER BY user_id) AS new_user_key
+            FROM (SELECT DISTINCT st.user_id FROM pg.silver.silver_table st WHERE st.user_id IS NOT NULL) u
+        ) AS source
+        ON target.user_id = source.user_id
+        WHEN NOT MATCHED THEN
+            INSERT (user_key, user_id)
+            VALUES (source.new_user_key, source.user_id);
     """)
 
-    # 5. Load ONLY new fact rows — filtered to purchase events, deduped on
-    #    (user_session, event_time, product_id), joined to the dims for keys.
+
+
     con.execute("""
-        INSERT INTO pg.data_warehouse.sales_transactions_fact
-            (sales_trans_key, event_time, event_type, price, user_session, user_key, product_key)
-        SELECT
-            (SELECT COALESCE(MAX(sales_trans_key), 0) FROM pg.data_warehouse.sales_transactions_fact)
-                + ROW_NUMBER() OVER () AS sales_trans_key,
-            event_time, event_type, price, user_session, user_key, product_key
-        FROM (
+        MERGE INTO pg.data_warehouse.sales_transactions_fact AS target
+        USING (
             SELECT
-                st.event_time, st.event_type, st.price, st.user_session,
-                us.user_key, pr.product_key
-            FROM pg.silver.silver_table st
-            LEFT JOIN pg.data_warehouse.users_dim us ON st.user_id = us.user_id
-            LEFT JOIN pg.data_warehouse.products_dim pr ON st.product_id = pr.product_id
-            WHERE st.event_type = 'purchase'
-              AND NOT EXISTS (
-                  SELECT 1 FROM pg.data_warehouse.sales_transactions_fact f
-                  WHERE f.user_session = st.user_session
-                    AND f.event_time = st.event_time
-                    AND f.product_key = pr.product_key
-              )
-        );
+                event_time, event_type, price, user_session, user_key, product_key,
+                (SELECT COALESCE(MAX(sales_trans_key), 0) FROM pg.data_warehouse.sales_transactions_fact)
+                    + ROW_NUMBER() OVER (ORDER BY user_session, event_time) AS new_sales_trans_key
+            FROM (
+                SELECT
+                    st.event_time, st.event_type, st.price, st.user_session,
+                    us.user_key, pr.product_key
+                FROM pg.silver.silver_table st
+                LEFT JOIN pg.data_warehouse.users_dim us ON st.user_id = us.user_id
+                LEFT JOIN pg.data_warehouse.products_dim pr ON st.product_id = pr.product_id
+                WHERE st.event_type = 'purchase'
+            ) candidates
+        ) AS source
+        ON target.user_session = source.user_session
+           AND target.event_time = source.event_time
+           AND target.product_key = source.product_key
+        WHEN NOT MATCHED THEN
+            INSERT (sales_trans_key, event_time, event_type, price, user_session, user_key, product_key)
+            VALUES (
+                source.new_sales_trans_key, source.event_time, source.event_type,
+                source.price, source.user_session, source.user_key, source.product_key
+            );
     """)
 
     con.execute("COMMIT;")
@@ -196,4 +208,3 @@ except Exception as error:
     con.execute("ROLLBACK;")
     print("Data warehouse load failed:")
     print(error)
-

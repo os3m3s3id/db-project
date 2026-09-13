@@ -64,10 +64,9 @@ try:
         INNER JOIN data_warehouse.products_dim p ON f.product_key = p.product_key
         LIMIT 10;
     """)
-    result = cur.fetchall()
-    print(result)
+    
 
-    print("Done.")
+    print("Joins Created Successfully.")
 
 except Exception as e:
     pg_conn.rollback()
