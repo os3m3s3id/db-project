@@ -1,3 +1,5 @@
+import sys
+
 import psycopg2
 import os
 from dotenv import load_dotenv
@@ -53,6 +55,7 @@ try:
     pg_conn.commit()
 
     cur.execute("""
+        EXPLAIN ANALYZE
         SELECT
             u.user_id,
             p.product_id,
@@ -65,6 +68,12 @@ try:
         LIMIT 10;
     """)
     
+    plan_rows = cur.fetchall()
+    print(f"--- EXPLAIN ANALYZE output ({len(plan_rows)} lines) ---")
+    for row in plan_rows:
+        print(row[0])
+    import sys
+    sys.stdout.flush()
 
     print("Joins Created Successfully.")
 

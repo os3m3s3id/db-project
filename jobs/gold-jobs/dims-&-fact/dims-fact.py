@@ -1,22 +1,14 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# # Dims & Fact Tables Creation
-
+# Dims & Fact Tables Creation
 # In this document im going to create the dims and fact tables from what i have in the silver layer (The big table).
 
-# #### Imports:
+#### Imports:
 import duckdb
 import os
 from dotenv import load_dotenv
 load_dotenv(override=True)
 
 
-# #### Database connection details:
-
-# In[6]:
-
-
+#### Database connection details:
 try:
     pg_host = os.environ["POSTGRES_HOST"]
     pg_port = os.environ["POSTGRES_PORT"]
@@ -28,11 +20,7 @@ except KeyError as e:
     print(f"Environment variable not set: {e}")
 
 
-# #### Create database connection:
-
-# In[7]:
-
-
+#### Create database connection:
 try:
     con = duckdb.connect()
     con.execute("INSTALL postgres; LOAD postgres;")
@@ -42,9 +30,6 @@ try:
     """)
 except Exception as e:
     print(f"Error creating database engine: {e}")
-
-
-# In[8]:
 
 
 try:
